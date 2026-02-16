@@ -109,6 +109,22 @@ export function InputAutocomplete(props: InputAutocompleteProps) {
       return
     }
 
+    if (evt.name === "right") {
+      // Right arrow accepts the current selection
+      const idx = selectedIdx()
+      const suggestions = visibleSuggestions()
+      if (idx >= 0 && idx < suggestions.length) {
+        evt.preventDefault()
+        const suggestion = suggestions[idx]
+        if (suggestion) selectSuggestion(suggestion)
+      } else if (suggestions.length > 0 && suggestions[0]) {
+        // If nothing selected, select first
+        evt.preventDefault()
+        selectSuggestion(suggestions[0])
+      }
+      return
+    }
+
     if (evt.name === "return") {
       // Enter accepts the current selection if any
       const idx = selectedIdx()
