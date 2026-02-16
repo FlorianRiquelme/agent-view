@@ -29,10 +29,10 @@ When working with AI coding agents, you often need to run multiple agents on dif
 
 ## Installation
 
-### Quick Install (requires [GitHub CLI](https://cli.github.com/))
+### Quick Install
 
 ```bash
-gh release download -R frayo44/agent-view -p 'install.sh' -O - | bash
+curl -fsSL https://raw.githubusercontent.com/frayo44/agent-view/main/install.sh | bash
 ```
 
 ### Manual Install
