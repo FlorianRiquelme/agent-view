@@ -1,12 +1,16 @@
 # Agent View
 
-**A terminal-based agent orchestrator for managing multiple AI coding assistants.**
+**A lightweight terminal-based agent orchestrator for managing multiple AI coding assistants.**
 
-Run multiple AI coding agents in parallel and manage them from a single dashboard. Agent View is a tmux session manager built for AI-assisted development workflows - monitor agent status in real-time, get notifications when agents finish or need input, and seamlessly switch between sessions.
+Run multiple AI coding agents in parallel and manage them from a single dashboard. Agent View is a lightweight tmux session manager built for AI-assisted development workflows - monitor agent status in real-time, get notifications when agents finish or need input, and seamlessly switch between sessions.
 
 Works with **Claude Code**, **Gemini CLI**, **OpenCode**, **Codex CLI**, and any custom AI coding tool.
 
-> If you find this useful, please consider giving it a star to help others discover it.
+---
+
+### ⭐ If you find this useful, please give it a star to help others discover it!
+
+---
 
 ## Why Agent View?
 
