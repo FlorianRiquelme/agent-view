@@ -35,7 +35,7 @@ describe("sortSessionsByCreatedAt", () => {
     const session = createMockSession({ id: "1" })
     const result = sortSessionsByCreatedAt([session])
     expect(result).toHaveLength(1)
-    expect(result[0].id).toBe("1")
+    expect(result[0]!.id).toBe("1")
   })
 
   test("sorts sessions by creation time, newest first", () => {
@@ -54,9 +54,9 @@ describe("sortSessionsByCreatedAt", () => {
 
     const result = sortSessionsByCreatedAt([oldest, middle, newest])
 
-    expect(result[0].id).toBe("newest")
-    expect(result[1].id).toBe("middle")
-    expect(result[2].id).toBe("oldest")
+    expect(result[0]!.id).toBe("newest")
+    expect(result[1]!.id).toBe("middle")
+    expect(result[2]!.id).toBe("oldest")
   })
 
   test("order is stable regardless of status", () => {
@@ -79,9 +79,9 @@ describe("sortSessionsByCreatedAt", () => {
     const result = sortSessionsByCreatedAt([running, waiting, idle])
 
     // Order should be by creation time, not status
-    expect(result[0].id).toBe("idle")
-    expect(result[1].id).toBe("waiting")
-    expect(result[2].id).toBe("running")
+    expect(result[0]!.id).toBe("idle")
+    expect(result[1]!.id).toBe("waiting")
+    expect(result[2]!.id).toBe("running")
   })
 
   test("order is stable regardless of lastAccessed", () => {
@@ -99,8 +99,8 @@ describe("sortSessionsByCreatedAt", () => {
     const result = sortSessionsByCreatedAt([recentlyAccessed, notRecentlyAccessed])
 
     // Order should be by creation time, not lastAccessed
-    expect(result[0].id).toBe("not-recently-accessed")
-    expect(result[1].id).toBe("recently-accessed")
+    expect(result[0]!.id).toBe("not-recently-accessed")
+    expect(result[1]!.id).toBe("recently-accessed")
   })
 
   test("does not mutate original array", () => {
@@ -112,8 +112,8 @@ describe("sortSessionsByCreatedAt", () => {
 
     sortSessionsByCreatedAt(sessions)
 
-    expect(sessions[0].id).toBe(original[0].id)
-    expect(sessions[1].id).toBe(original[1].id)
+    expect(sessions[0]!.id).toBe(original[0]!.id)
+    expect(sessions[1]!.id).toBe(original[1]!.id)
   })
 
   test("handles sessions with same creation time", () => {
