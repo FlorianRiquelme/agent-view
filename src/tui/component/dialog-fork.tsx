@@ -10,6 +10,7 @@ import { useSync } from "@tui/context/sync"
 import { useDialog } from "@tui/ui/dialog"
 import { useToast } from "@tui/ui/toast"
 import { isGitRepo, getRepoRoot, createWorktree, generateBranchName, sanitizeBranchName } from "@/core/git"
+import { canFork } from "@/core/claude"
 import type { Session } from "@/core/types"
 
 type FocusField = "title" | "worktree" | "branch"
@@ -33,6 +34,10 @@ export function DialogFork(props: DialogForkProps) {
   const [worktreeBranch, setWorktreeBranch] = createSignal("")
   const [isInGitRepo, setIsInGitRepo] = createSignal(false)
 
+  // Fork eligibility state
+  const [canForkSession, setCanForkSession] = createSignal(true)
+  const [checkingForkEligibility, setCheckingForkEligibility] = createSignal(true)
+
   // Focus state
   const [focusedField, setFocusedField] = createSignal<FocusField>("title")
 
@@ -51,6 +56,19 @@ export function DialogFork(props: DialogForkProps) {
     } catch {
       setIsInGitRepo(false)
       setUseWorktree(false)
+    }
+  })
+
+  // Check fork eligibility (active Claude session required)
+  createEffect(async () => {
+    setCheckingForkEligibility(true)
+    try {
+      const result = await canFork(props.session.projectPath)
+      setCanForkSession(result)
+    } catch {
+      setCanForkSession(false)
+    } finally {
+      setCheckingForkEligibility(false)
     }
   })
 
@@ -88,6 +106,16 @@ export function DialogFork(props: DialogForkProps) {
     // Only Claude sessions can be forked
     if (props.session.tool !== "claude") {
       toast.show({ message: "Only Claude sessions can be forked", variant: "error", duration: 2000 })
+      return
+    }
+
+    // Check fork eligibility
+    if (!canForkSession()) {
+      toast.show({
+        message: "Cannot fork: no active Claude session detected (session must be running)",
+        variant: "error",
+        duration: 3000
+      })
       return
     }
 
@@ -133,10 +161,12 @@ export function DialogFork(props: DialogForkProps) {
   }
 
   useKeyboard((evt) => {
-    // Enter to fork
+    // Enter to fork (only if eligible)
     if (evt.name === "return" && !evt.shift) {
       evt.preventDefault()
-      handleFork()
+      if (canForkSession() && !checkingForkEligibility()) {
+        handleFork()
+      }
       return
     }
 
@@ -189,6 +219,15 @@ export function DialogFork(props: DialogForkProps) {
           <text fg={theme.accent}>({props.session.tool})</text>
         </box>
       </box>
+
+      {/* Fork eligibility warning */}
+      <Show when={!checkingForkEligibility() && !canForkSession()}>
+        <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+          <text fg={theme.error}>
+            No active Claude session detected. The session must be running with an active conversation to fork.
+          </text>
+        </box>
+      </Show>
 
       {/* Title field */}
       <box paddingLeft={4} paddingRight={4} paddingTop={1} gap={1}>
@@ -267,13 +306,13 @@ export function DialogFork(props: DialogForkProps) {
       {/* Fork button */}
       <box paddingLeft={4} paddingRight={4} paddingTop={2}>
         <box
-          backgroundColor={forking() ? theme.backgroundElement : theme.primary}
+          backgroundColor={forking() || checkingForkEligibility() || !canForkSession() ? theme.backgroundElement : theme.primary}
           padding={1}
-          onMouseUp={handleFork}
+          onMouseUp={canForkSession() ? handleFork : undefined}
           alignItems="center"
         >
-          <text fg={theme.selectedListItemText} attributes={TextAttributes.BOLD}>
-            {forking() ? "Forking..." : "Fork Session"}
+          <text fg={canForkSession() ? theme.selectedListItemText : theme.textMuted} attributes={TextAttributes.BOLD}>
+            {checkingForkEligibility() ? "Checking..." : forking() ? "Forking..." : !canForkSession() ? "Cannot Fork" : "Fork Session"}
           </text>
         </box>
       </box>

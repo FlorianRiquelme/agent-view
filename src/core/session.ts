@@ -9,6 +9,15 @@ import { getToolCommand } from "./types"
 import * as tmux from "./tmux"
 import { randomUUID } from "crypto"
 import path from "path"
+import fs from "fs"
+import os from "os"
+import { getClaudeSessionID, buildForkCommand, canFork } from "./claude"
+
+const logFile = path.join(os.homedir(), ".agent-orchestrator", "debug.log")
+function log(...args: unknown[]) {
+  const msg = `[${new Date().toISOString()}] [SESSION] ${args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ")}\n`
+  try { fs.appendFileSync(logFile, msg) } catch {}
+}
 
 // Name generation patterns
 const ADJECTIVES = [
@@ -105,6 +114,7 @@ export class SessionManager {
    * Create a new session
    */
   async create(options: SessionCreateOptions): Promise<Session> {
+    log("create() called with options:", options)
     const storage = getStorage()
     const now = new Date()
 
@@ -113,15 +123,23 @@ export class SessionManager {
     const tmuxName = tmux.generateSessionName(title)
     const command = options.command || getToolCommand(options.tool)
 
+    log("Creating tmux session:", tmuxName, "command:", command)
+
     // Create tmux session
-    await tmux.createSession({
-      name: tmuxName,
-      command,
-      cwd: options.projectPath,
-      env: {
-        AGENT_ORCHESTRATOR_SESSION: id
-      }
-    })
+    try {
+      await tmux.createSession({
+        name: tmuxName,
+        command,
+        cwd: options.projectPath,
+        env: {
+          AGENT_ORCHESTRATOR_SESSION: id
+        }
+      })
+      log("tmux session created successfully")
+    } catch (err) {
+      log("tmux.createSession error:", err)
+      throw err
+    }
 
     const session: Session = {
       id,
@@ -152,33 +170,100 @@ export class SessionManager {
 
   /**
    * Fork an existing session
+   * For Claude sessions, this uses --resume and --fork-session to continue the conversation
    */
   async fork(options: SessionForkOptions): Promise<Session> {
+    log("fork() called with options:", options)
     const storage = getStorage()
     const source = storage.getSession(options.sourceSessionId)
 
     if (!source) {
+      log("Source session not found:", options.sourceSessionId)
       throw new Error(`Source session not found: ${options.sourceSessionId}`)
     }
 
-    // For Claude sessions, we can use the session fork feature
+    log("Source session found:", source.id, source.tool, source.projectPath)
+
+    // Determine the project path (use worktree path if provided)
+    const projectPath = options.worktreePath || source.projectPath
+
+    // For Claude sessions, use real fork with --resume and --fork-session
+    if (source.tool === "claude") {
+      log("Forking Claude session")
+      // Get the Claude session ID from the running session
+      const claudeSessionId = getClaudeSessionID(source.projectPath)
+      log("Claude session ID:", claudeSessionId)
+
+      if (!claudeSessionId) {
+        log("No Claude session ID found")
+        throw new Error("Cannot fork: no active Claude session detected. Session must be running with an active conversation.")
+      }
+
+      // Generate new session ID for the fork
+      const newClaudeSessionId = randomUUID()
+      log("New Claude session ID:", newClaudeSessionId)
+
+      // Build fork command with Claude flags
+      const forkCommand = buildForkCommand({
+        projectPath,
+        parentSessionId: claudeSessionId,
+        newSessionId: newClaudeSessionId
+      })
+      log("Fork command:", forkCommand)
+
+      // Create session with the fork command
+      log("Calling this.create()")
+      const newSession = await this.create({
+        title: options.title || `${source.title}-fork`,
+        projectPath,
+        groupPath: source.groupPath,
+        tool: "claude",
+        command: forkCommand,
+        wrapper: source.wrapper,
+        parentSessionId: source.id,
+        worktreePath: options.worktreePath,
+        worktreeRepo: options.worktreeRepo,
+        worktreeBranch: options.worktreeBranch
+      })
+      log("Session created:", newSession.id)
+
+      // Store the Claude session IDs in toolData
+      storage.updateSessionField(newSession.id, "tool_data", JSON.stringify({
+        claudeSessionId: newClaudeSessionId,
+        parentClaudeSessionId: claudeSessionId,
+        claudeDetectedAt: Date.now()
+      }))
+
+      log("Fork complete, returning new session")
+      return newSession
+    }
+
+    // For non-Claude sessions, create a fresh session with the same config
     const newSession = await this.create({
       title: options.title || `${source.title}-fork`,
-      projectPath: source.projectPath,
+      projectPath,
       groupPath: source.groupPath,
       tool: source.tool,
       command: source.command,
       wrapper: source.wrapper,
       parentSessionId: source.id,
-      worktreePath: source.worktreePath,
-      worktreeRepo: source.worktreeRepo,
-      worktreeBranch: source.worktreeBranch
+      worktreePath: options.worktreePath,
+      worktreeRepo: options.worktreeRepo,
+      worktreeBranch: options.worktreeBranch
     })
 
-    // If preserving history and using Claude, we could copy session files
-    // This is tool-specific and would need implementation
-
     return newSession
+  }
+
+  /**
+   * Check if a session can be forked (has an active Claude session)
+   */
+  async canFork(sessionId: string): Promise<boolean> {
+    const session = getStorage().getSession(sessionId)
+    if (!session) return false
+    if (session.tool !== "claude") return false
+
+    return await canFork(session.projectPath)
   }
 
   /**

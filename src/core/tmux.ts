@@ -132,29 +132,36 @@ export async function createSession(options: {
   cwd?: string
   env?: Record<string, string>
 }): Promise<void> {
-  const args = [
-    "new-session",
-    "-d", // detached
-    "-s", options.name
-  ]
+  const cwd = options.cwd || process.env.HOME || "/tmp"
 
-  if (options.cwd) {
-    args.push("-c", options.cwd)
-  }
-
-  if (options.command) {
-    args.push(options.command)
-  }
-
-  const envVars = options.env || {}
-  const envString = Object.entries(envVars)
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" ")
-
-  const cmd = envString ? `${envString} tmux ${args.join(" ")}` : `tmux ${args.join(" ")}`
-
-  await execAsync(cmd)
+  // Step 1: Create the tmux session first (detached, no command)
+  const createCmd = `tmux new-session -d -s "${options.name}" -c "${cwd}"`
+  await execAsync(createCmd)
   registerSessionInCache(options.name)
+
+  // Step 2: Set environment variables in the tmux session
+  const envVars = options.env || {}
+  for (const [key, value] of Object.entries(envVars)) {
+    await execAsync(`tmux set-environment -t "${options.name}" ${key} "${value}"`)
+  }
+
+  // Step 3: Send the command via send-keys (like agent-deck does)
+  if (options.command) {
+    let cmdToSend = options.command
+
+    // IMPORTANT: Commands containing bash-specific syntax (like `session_id=$(...)`)
+    // must be wrapped in `bash -c` for fish shell compatibility.
+    // Fish uses different syntax: `set var (...)` instead of `var=$(...)`.
+    if (options.command.includes("$(") || options.command.includes("session_id=")) {
+      // Escape single quotes in the command for bash -c wrapper
+      const escapedCmd = options.command.replace(/'/g, "'\"'\"'")
+      cmdToSend = `bash -c '${escapedCmd}'`
+    }
+
+    // Send the command and press Enter
+    await sendKeys(options.name, cmdToSend)
+    await execAsync(`tmux send-keys -t "${options.name}" Enter`)
+  }
 }
 
 /**

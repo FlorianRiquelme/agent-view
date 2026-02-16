@@ -14,11 +14,21 @@ import { DialogNew } from "@tui/component/dialog-new"
 import { DialogFork } from "@tui/component/dialog-fork"
 import { DialogRename } from "@tui/component/dialog-rename"
 import { attachSessionSync, capturePane, wasCommandPaletteRequested } from "@/core/tmux"
+import { canFork } from "@/core/claude"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import type { Session } from "@/core/types"
 import { formatRelativeTime, formatSmartTime, truncatePath } from "@tui/util/locale"
 import { STATUS_ICONS } from "@tui/util/status"
 import { sortSessionsByCreatedAt } from "@tui/util/session"
+import fs from "fs"
+import path from "path"
+import os from "os"
+
+const logFile = path.join(os.homedir(), ".agent-orchestrator", "debug.log")
+function log(...args: unknown[]) {
+  const msg = `[${new Date().toISOString()}] [HOME] ${args.map(a => typeof a === "object" ? JSON.stringify(a) : String(a)).join(" ")}\n`
+  try { fs.appendFileSync(logFile, msg) } catch {}
+}
 
 const LOGO = `
  █████╗  ██████╗ ███████╗███╗   ██╗████████╗
@@ -201,23 +211,46 @@ export function Home() {
   }
 
   async function handleFork(session: Session) {
+    log("handleFork called for session:", session.id, "tool:", session.tool, "projectPath:", session.projectPath)
+
     // Only Claude sessions can be forked
     if (session.tool !== "claude") {
+      log("Fork rejected: not a claude session")
       toast.show({ message: "Only Claude sessions can be forked", variant: "error", duration: 2000 })
       return
     }
 
+    // Check if session has an active Claude session ID
+    log("Checking canFork for projectPath:", session.projectPath)
+    const canForkSession = await canFork(session.projectPath)
+    log("canFork result:", canForkSession)
+
+    if (!canForkSession) {
+      log("Fork rejected: no active Claude session")
+      toast.show({
+        message: "Cannot fork: no active Claude session detected (session must be running)",
+        variant: "error",
+        duration: 3000
+      })
+      return
+    }
+
     try {
+      log("Calling sync.session.fork")
       const forked = await sync.session.fork({ sourceSessionId: session.id })
+      log("Fork successful:", forked.id)
       toast.show({ message: `Forked as ${forked.title}`, variant: "success", duration: 2000 })
       sync.refresh()
     } catch (err) {
+      log("Fork error:", err)
       toast.error(err as Error)
     }
   }
 
   // Keyboard navigation
   useKeyboard((evt) => {
+    log("Home useKeyboard:", evt.name, "dialog.stack.length:", dialog.stack.length)
+
     // Skip if dialog is open
     if (dialog.stack.length > 0) return
 
@@ -274,8 +307,10 @@ export function Home() {
 
     // f to fork (quick)
     if (evt.name === "f" && !evt.shift) {
+      log("f pressed, selectedSession:", selectedSession()?.id, selectedSession()?.tool)
       const session = selectedSession()
       if (session) {
+        log("Calling handleFork for session:", session.id)
         handleFork(session)
       }
     }
