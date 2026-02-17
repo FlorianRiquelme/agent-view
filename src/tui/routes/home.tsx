@@ -13,13 +13,23 @@ import { useToast } from "@tui/ui/toast"
 import { DialogNew } from "@tui/component/dialog-new"
 import { DialogFork } from "@tui/component/dialog-fork"
 import { DialogRename } from "@tui/component/dialog-rename"
+import { DialogGroup } from "@tui/component/dialog-group"
+import { DialogMove } from "@tui/component/dialog-move"
 import { attachSessionSync, capturePane, wasCommandPaletteRequested } from "@/core/tmux"
 import { canFork } from "@/core/claude"
 import { useCommandDialog } from "@tui/component/dialog-command"
-import type { Session } from "@/core/types"
+import type { Session, Group } from "@/core/types"
 import { formatRelativeTime, formatSmartTime, truncatePath } from "@tui/util/locale"
 import { STATUS_ICONS } from "@tui/util/status"
 import { sortSessionsByCreatedAt } from "@tui/util/session"
+import {
+  flattenGroupTree,
+  ensureDefaultGroup,
+  getGroupSessionCount,
+  getGroupStatusSummary,
+  DEFAULT_GROUP_PATH,
+  type GroupedItem
+} from "@tui/util/groups"
 import fs from "fs"
 import path from "path"
 import os from "os"
@@ -85,20 +95,46 @@ export function Home() {
     return dimensions().width - leftWidth() - 1 // -1 for separator
   })
 
-  // Get sorted sessions by creation time (stable order)
-  const sessions = createMemo(() => {
-    return sortSessionsByCreatedAt(sync.session.list())
+  // Ensure default group exists on first load
+  createEffect(() => {
+    const currentGroups = sync.group.list()
+    const withDefault = ensureDefaultGroup(currentGroups)
+    if (withDefault.length !== currentGroups.length) {
+      sync.group.save(withDefault)
+    }
+  })
+
+  // Get all sessions
+  const allSessions = createMemo(() => sync.session.list())
+
+  // Get grouped items (groups + sessions flattened)
+  const groupedItems = createMemo(() => {
+    const groups = ensureDefaultGroup(sync.group.list())
+    return flattenGroupTree(allSessions(), groups)
   })
 
   // Keep selection in bounds
   createEffect(() => {
-    const len = sessions().length
+    const len = groupedItems().length
     if (selectedIndex() >= len && len > 0) {
       setSelectedIndex(len - 1)
     }
   })
 
-  const selectedSession = createMemo(() => sessions()[selectedIndex()])
+  // Get the selected item (could be group or session)
+  const selectedItem = createMemo(() => groupedItems()[selectedIndex()])
+
+  // Get the selected session (only if a session is selected)
+  const selectedSession = createMemo(() => {
+    const item = selectedItem()
+    return item?.type === "session" ? item.session : undefined
+  })
+
+  // Get the selected group (only if a group is selected)
+  const selectedGroup = createMemo(() => {
+    const item = selectedItem()
+    return item?.type === "group" ? item.group : undefined
+  })
 
   // Fetch preview with debounce; keep showing previous content while loading
   createEffect(() => {
@@ -161,12 +197,44 @@ export function Home() {
   })
 
   function move(delta: number) {
-    const len = sessions().length
+    const len = groupedItems().length
     if (len === 0) return
     let next = selectedIndex() + delta
     if (next < 0) next = len - 1
     if (next >= len) next = 0
     setSelectedIndex(next)
+  }
+
+  // Jump to group by index (1-9)
+  function jumpToGroup(groupIndex: number) {
+    const items = groupedItems()
+    const idx = items.findIndex(item => item.type === "group" && item.groupIndex === groupIndex)
+    if (idx >= 0) {
+      setSelectedIndex(idx)
+    }
+  }
+
+  // Handle deleting a group
+  async function handleDeleteGroup(group: Group) {
+    const sessionCount = getGroupSessionCount(allSessions(), group.path)
+
+    // Don't allow deleting default group
+    if (group.path === DEFAULT_GROUP_PATH) {
+      toast.show({ message: "Cannot delete the default group", variant: "error", duration: 2000 })
+      return
+    }
+
+    // Move sessions to default group before deleting
+    if (sessionCount > 0) {
+      const sessionsInGroup = allSessions().filter(s => s.groupPath === group.path)
+      for (const session of sessionsInGroup) {
+        sync.session.moveToGroup(session.id, DEFAULT_GROUP_PATH)
+      }
+    }
+
+    sync.group.delete(group.path)
+    toast.show({ message: `Deleted group "${group.name}"`, variant: "info", duration: 2000 })
+    sync.refresh()
   }
 
   function handleAttach(session: Session) {
@@ -266,30 +334,65 @@ export function Home() {
     if (evt.name === "pagedown") {
       move(10)
     }
-    if (evt.name === "home" || evt.name === "g") {
+    if (evt.name === "home") {
       setSelectedIndex(0)
     }
     if (evt.name === "end") {
-      setSelectedIndex(Math.max(0, sessions().length - 1))
+      setSelectedIndex(Math.max(0, groupedItems().length - 1))
     }
 
-    // Enter to attach
+    // Number keys 1-9 to jump to groups
+    if (/^[1-9]$/.test(evt.name)) {
+      jumpToGroup(parseInt(evt.name, 10))
+    }
+
+    // Right arrow: expand group (or attach to session)
+    if (evt.name === "right" || evt.name === "l") {
+      const item = selectedItem()
+      if (item?.type === "group" && item.group && !item.group.expanded) {
+        sync.group.toggle(item.group.path)
+      } else if (item?.type === "session" && item.session) {
+        handleAttach(item.session)
+      }
+    }
+
+    // Left arrow: collapse group
+    if (evt.name === "left" || evt.name === "h") {
+      const item = selectedItem()
+      if (item?.type === "group" && item.group && item.group.expanded) {
+        sync.group.toggle(item.group.path)
+      } else if (item?.type === "session") {
+        // When on a session, collapse its parent group
+        const groupItem = groupedItems().find(
+          i => i.type === "group" && i.groupPath === item.groupPath
+        )
+        if (groupItem?.group?.expanded) {
+          sync.group.toggle(groupItem.group.path)
+        }
+      }
+    }
+
+    // Enter: attach to session OR toggle group expand/collapse
     if (evt.name === "return") {
-      const session = selectedSession()
-      if (session) {
-        handleAttach(session)
+      const item = selectedItem()
+      if (item?.type === "session" && item.session) {
+        handleAttach(item.session)
+      } else if (item?.type === "group" && item.group) {
+        sync.group.toggle(item.group.path)
       }
     }
 
-    // d to delete
+    // d to delete session OR group
     if (evt.name === "d") {
-      const session = selectedSession()
-      if (session) {
-        handleDelete(session)
+      const item = selectedItem()
+      if (item?.type === "session" && item.session) {
+        handleDelete(item.session)
+      } else if (item?.type === "group" && item.group) {
+        handleDeleteGroup(item.group)
       }
     }
 
-    // r to restart (lowercase only)
+    // r to restart (lowercase only, sessions only)
     if (evt.name === "r" && !evt.shift) {
       const session = selectedSession()
       if (session) {
@@ -297,11 +400,26 @@ export function Home() {
       }
     }
 
-    // R (Shift+r) to rename
+    // R (Shift+r) to rename session OR group
     if (evt.name === "r" && evt.shift) {
+      const item = selectedItem()
+      if (item?.type === "session" && item.session) {
+        dialog.push(() => <DialogRename session={item.session!} />)
+      } else if (item?.type === "group" && item.group) {
+        dialog.push(() => <DialogGroup mode="rename" group={item.group!} />)
+      }
+    }
+
+    // g to create new group
+    if (evt.name === "g" && !evt.shift) {
+      dialog.push(() => <DialogGroup mode="create" />)
+    }
+
+    // m to move session to group
+    if (evt.name === "m") {
       const session = selectedSession()
       if (session) {
-        dialog.push(() => <DialogRename session={session} />)
+        dialog.push(() => <DialogMove session={session} />)
       }
     }
 
@@ -341,8 +459,78 @@ export function Home() {
     return lines
   })
 
-  // Render session list item
-  function SessionItem(props: { session: Session; index: number }) {
+  // Render group header
+  function GroupHeader(props: { group: Group; index: number }) {
+    const isSelected = createMemo(() => props.index === selectedIndex())
+    const sessionCount = createMemo(() => getGroupSessionCount(allSessions(), props.group.path))
+    const statusSummary = createMemo(() => getGroupStatusSummary(allSessions(), props.group.path))
+
+    // Find group index for hotkey hint
+    const item = createMemo(() => groupedItems()[props.index])
+    const groupIndex = createMemo(() => item()?.groupIndex)
+
+    return (
+      <box
+        flexDirection="row"
+        paddingLeft={1}
+        paddingRight={1}
+        height={1}
+        backgroundColor={isSelected() ? theme.primary : theme.backgroundElement}
+        onMouseUp={() => {
+          setSelectedIndex(props.index)
+          sync.group.toggle(props.group.path)
+        }}
+        onMouseOver={() => setSelectedIndex(props.index)}
+      >
+        {/* Expand/collapse arrow */}
+        <text fg={isSelected() ? theme.selectedListItemText : theme.accent}>
+          {props.group.expanded ? "\u25BC" : "\u25B6"}
+        </text>
+        <text> </text>
+
+        {/* Group name */}
+        <text
+          fg={isSelected() ? theme.selectedListItemText : theme.text}
+          attributes={TextAttributes.BOLD}
+        >
+          {props.group.name}
+        </text>
+
+        {/* Spacer */}
+        <text flexGrow={1}> </text>
+
+        {/* Status indicators */}
+        <Show when={statusSummary().running > 0}>
+          <text fg={isSelected() ? theme.selectedListItemText : theme.success}>
+            {STATUS_ICONS.running}{statusSummary().running}
+          </text>
+          <text> </text>
+        </Show>
+        <Show when={statusSummary().waiting > 0}>
+          <text fg={isSelected() ? theme.selectedListItemText : theme.warning}>
+            {STATUS_ICONS.waiting}{statusSummary().waiting}
+          </text>
+          <text> </text>
+        </Show>
+
+        {/* Session count */}
+        <text fg={isSelected() ? theme.selectedListItemText : theme.textMuted}>
+          ({sessionCount()})
+        </text>
+
+        {/* Hotkey hint */}
+        <Show when={groupIndex()}>
+          <text> </text>
+          <text fg={isSelected() ? theme.selectedListItemText : theme.textMuted}>
+            [{groupIndex()}]
+          </text>
+        </Show>
+      </box>
+    )
+  }
+
+  // Render session list item (indented under group)
+  function SessionItem(props: { session: Session; index: number; indented?: boolean }) {
     const isSelected = createMemo(() => props.index === selectedIndex())
     const statusColor = createMemo(() => {
       switch (props.session.status) {
@@ -358,10 +546,13 @@ export function Home() {
       ? props.session.title.slice(0, maxTitleLen - 2) + ".."
       : props.session.title
 
+    // Indentation for sessions under groups
+    const indent = props.indented ? 2 : 0
+
     return (
       <box
         flexDirection="row"
-        paddingLeft={1}
+        paddingLeft={1 + indent}
         paddingRight={1}
         height={1}
         backgroundColor={isSelected() ? theme.primary : undefined}
@@ -512,7 +703,7 @@ export function Home() {
 
       {/* Main content area */}
       <Show
-        when={sessions().length > 0}
+        when={allSessions().length > 0}
         fallback={<EmptyState />}
       >
         <box flexDirection="row" flexGrow={1}>
@@ -530,15 +721,26 @@ export function Home() {
               </text>
             </box>
 
-            {/* Session list */}
+            {/* Session list (grouped) */}
             <scrollbox
               flexGrow={1}
               scrollbarOptions={{ visible: true }}
               ref={(r: ScrollBoxRenderable) => { scrollRef = r }}
             >
-              <For each={sessions()}>
-                {(session, index) => (
-                  <SessionItem session={session} index={index()} />
+              <For each={groupedItems()}>
+                {(item, index) => (
+                  <Show
+                    when={item.type === "group"}
+                    fallback={
+                      <SessionItem
+                        session={item.session!}
+                        index={index()}
+                        indented={true}
+                      />
+                    }
+                  >
+                    <GroupHeader group={item.group!} index={index()} />
+                  </Show>
                 )}
               </For>
             </scrollbox>
@@ -617,6 +819,10 @@ export function Home() {
           <text fg={theme.textMuted}>navigate</text>
         </box>
         <box flexDirection="column" alignItems="center">
+          <text fg={theme.text}>←→</text>
+          <text fg={theme.textMuted}>fold</text>
+        </box>
+        <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>Enter</text>
           <text fg={theme.textMuted}>attach</text>
         </box>
@@ -625,16 +831,16 @@ export function Home() {
           <text fg={theme.textMuted}>new</text>
         </box>
         <box flexDirection="column" alignItems="center">
-          <text fg={theme.text}>l</text>
-          <text fg={theme.textMuted}>list</text>
+          <text fg={theme.text}>g</text>
+          <text fg={theme.textMuted}>group</text>
+        </box>
+        <box flexDirection="column" alignItems="center">
+          <text fg={theme.text}>m</text>
+          <text fg={theme.textMuted}>move</text>
         </box>
         <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>d</text>
           <text fg={theme.textMuted}>delete</text>
-        </box>
-        <box flexDirection="column" alignItems="center">
-          <text fg={theme.text}>r</text>
-          <text fg={theme.textMuted}>restart</text>
         </box>
         <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>R</text>
@@ -645,12 +851,8 @@ export function Home() {
           <text fg={theme.textMuted}>fork</text>
         </box>
         <box flexDirection="column" alignItems="center">
-          <text fg={theme.text}>F</text>
-          <text fg={theme.textMuted}>fork+wt</text>
-        </box>
-        <box flexDirection="column" alignItems="center">
-          <text fg={theme.text}>Ctrl+Q</text>
-          <text fg={theme.textMuted}>detach</text>
+          <text fg={theme.text}>1-9</text>
+          <text fg={theme.textMuted}>jump</text>
         </box>
         <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>q</text>

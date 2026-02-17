@@ -72,15 +72,19 @@ av
 | Key | Action |
 |-----|--------|
 | `n` | Create new session |
-| `l` | List all sessions |
-| `Enter` | Attach to selected session |
+| `Enter` | Attach to session / toggle group |
 | `↑/k` | Navigate up |
 | `↓/j` | Navigate down |
-| `d` | Delete session |
+| `→/l` | Expand group (or attach to session) |
+| `←/h` | Collapse group |
+| `d` | Delete session or group |
 | `r` | Restart session |
-| `R` | Rename session |
+| `R` | Rename session or group |
 | `f` | Fork session |
 | `F` | Fork session with worktree |
+| `g` | Create new group |
+| `m` | Move session to group |
+| `1-9` | Jump to group by number |
 | `Ctrl+K` | Open command palette |
 | `?` | Show help |
 | `q` | Quit |

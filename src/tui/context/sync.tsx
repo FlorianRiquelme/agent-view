@@ -123,6 +123,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         rename(id: string, title: string): void {
           manager.updateTitle(id, title)
           refresh()
+        },
+        moveToGroup(id: string, groupPath: string): void {
+          manager.moveToGroup(id, groupPath)
+          refresh()
         }
       },
       group: {
@@ -143,6 +147,32 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         toggle(path: string): void {
           const groups = store.groups.map((g) =>
             g.path === path ? { ...g, expanded: !g.expanded } : g
+          )
+          storage.saveGroups(groups)
+          refresh()
+        },
+        create(name: string): void {
+          const path = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "group"
+          // Ensure unique path
+          let finalPath = path
+          let counter = 1
+          while (store.groups.some(g => g.path === finalPath)) {
+            finalPath = `${path}-${counter}`
+            counter++
+          }
+          const newGroup: Group = {
+            path: finalPath,
+            name,
+            expanded: true,
+            order: store.groups.length,
+            defaultPath: ""
+          }
+          storage.saveGroups([...store.groups, newGroup])
+          refresh()
+        },
+        rename(path: string, newName: string): void {
+          const groups = store.groups.map((g) =>
+            g.path === path ? { ...g, name: newName } : g
           )
           storage.saveGroups(groups)
           refresh()
