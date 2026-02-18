@@ -83,27 +83,32 @@ export class SessionManager {
 
       const isActive = tmux.isSessionActive(session.tmuxSession, 2)
 
-      if (isActive) {
-        // Check for waiting state by capturing output
-        try {
-          const output = await tmux.capturePane(session.tmuxSession, {
-            startLine: -50,
-            endLine: -1
-          })
-          const status = tmux.parseToolStatus(output)
+      // Always capture output and check patterns - not just when active
+      // This fixes the bug where waiting sessions were incorrectly marked as idle
+      try {
+        // Don't use endLine - Claude Code TUI may have blank lines at bottom
+        // which causes -E -1 to capture mostly empty content
+        const output = await tmux.capturePane(session.tmuxSession, {
+          startLine: -100
+        })
+        const status = tmux.parseToolStatus(output, session.tool)
 
-          if (status.isWaiting) {
-            storage.writeStatus(session.id, "waiting", session.tool)
-          } else if (status.hasError) {
-            storage.writeStatus(session.id, "error", session.tool)
-          } else {
-            storage.writeStatus(session.id, "running", session.tool)
-          }
-        } catch {
+        if (status.isWaiting) {
+          // Agent is waiting for user input (permission prompt, question, etc.)
+          storage.writeStatus(session.id, "waiting", session.tool)
+        } else if (status.hasError) {
+          // Agent encountered an error
+          storage.writeStatus(session.id, "error", session.tool)
+        } else if (status.isBusy || isActive) {
+          // Agent is actively working (spinner visible, recent output, etc.)
           storage.writeStatus(session.id, "running", session.tool)
+        } else {
+          // No recent activity and no waiting prompt - idle
+          storage.writeStatus(session.id, "idle", session.tool)
         }
-      } else {
-        storage.writeStatus(session.id, "idle", session.tool)
+      } catch {
+        // Fallback: use activity-based detection if capture fails
+        storage.writeStatus(session.id, isActive ? "running" : "idle", session.tool)
       }
     }
 

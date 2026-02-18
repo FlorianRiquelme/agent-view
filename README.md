@@ -41,6 +41,18 @@ When working with AI coding agents, you often need to run multiple agents on dif
 - **Session Groups** - Organize sessions into groups by project or workflow
 - **Persistent State** - Sessions survive terminal restarts and system reboots via tmux
 
+### Status Detection
+
+Agent View monitors your sessions and shows real-time status indicators:
+
+| Status | Symbol | What It Means |
+|--------|--------|---------------|
+| **Running** | `●` green | Agent is actively working |
+| **Waiting** | `◐` yellow | Needs your input |
+| **Idle** | `○` gray | Ready for commands |
+| **Stopped** | `◻` gray | Session was stopped |
+| **Error** | `✗` red | Something went wrong |
+
 ## Installation
 
 ### Quick Install

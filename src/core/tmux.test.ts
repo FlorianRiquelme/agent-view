@@ -111,10 +111,58 @@ describe("parseToolStatus", () => {
     expect(status.isWaiting).toBe(true)
   })
 
-  test("detects permission denied", () => {
-    const output = "Error: Permission denied for /etc/passwd"
-    const status = parseToolStatus(output)
+  test("detects Claude permission prompt", () => {
+    // Claude Code permission prompts should be detected as waiting
+    const output = "Do you want to run this command?\n  Yes, allow once\n  Allow always\n  No, and tell Claude"
+    const status = parseToolStatus(output, "claude")
     expect(status.isWaiting).toBe(true)
+  })
+
+  test("detects Claude numbered permission prompt", () => {
+    // Real Claude Code permission prompt format
+    const output = `Do you want to proceed?
+  1. Yes
+   2. Yes, allow reading from src/ from this project
+   3. No
+ Esc to cancel · Tab to amend`
+    const status = parseToolStatus(output, "claude")
+    expect(status.isWaiting).toBe(true)
+    expect(status.isBusy).toBe(false)
+  })
+
+  test("detects Claude at prompt as idle (not waiting)", () => {
+    // Claude at regular prompt is idle, not blocked on anything
+    const output = `Claude finished the task.
+  ? for shortcuts`
+    const status = parseToolStatus(output, "claude")
+    expect(status.isWaiting).toBe(false) // Not blocked, just at prompt
+    expect(status.isBusy).toBe(false)
+  })
+
+  test("detects Claude mode indicator as idle (not waiting)", () => {
+    // Claude showing mode indicator is idle, not blocked
+    const output = `Made changes to file.ts
+ accept edits on (shift+tab to cycle)`
+    const status = parseToolStatus(output, "claude")
+    expect(status.isWaiting).toBe(false) // Mode indicator, not a blocking prompt
+    expect(status.isBusy).toBe(false)
+  })
+
+  test("detects Claude busy with spinner", () => {
+    // Spinner character indicates Claude is processing
+    const output = `⠹ Working on your request...`
+    const status = parseToolStatus(output, "claude")
+    expect(status.isBusy).toBe(true)
+  })
+
+  test("detects Claude exited state", () => {
+    // Claude has exited, shell prompt showing
+    const output = `Resume this session with:
+claude --resume abc123
+bin git:(main) ❯`
+    const status = parseToolStatus(output, "claude")
+    expect(status.isWaiting).toBe(false)
+    expect(status.isBusy).toBe(false)
   })
 
   test("detects do you want to pattern", () => {
@@ -145,16 +193,16 @@ describe("parseToolStatus", () => {
     expect(status.hasError).toBe(false)
   })
 
-  test("only checks last 20 lines", () => {
+  test("only checks last 30 lines", () => {
     // Create output with error early but clean output at the end
     const lines = ["Error: old error"]
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 35; i++) {
       lines.push(`Line ${i}`)
     }
     const output = lines.join("\n")
 
     const status = parseToolStatus(output)
-    expect(status.hasError).toBe(false) // Error is outside last 20 lines
+    expect(status.hasError).toBe(false) // Error is outside last 30 lines
   })
 
   test("isActive is always false (determined by activity timestamp)", () => {
