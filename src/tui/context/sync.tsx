@@ -7,7 +7,7 @@ import { createSignal, createEffect, onCleanup, batch } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { getStorage } from "@/core/storage"
 import { getSessionManager } from "@/core/session"
-import type { Session, Group, Config } from "@/core/types"
+import type { Session, Group, Config, Shortcut } from "@/core/types"
 import { createSimpleContext } from "./helper"
 
 export type SyncStatus = "loading" | "partial" | "complete"
@@ -23,6 +23,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     }>({
       sessions: [],
       groups: [],
+      shortcuts: [] as Shortcut[],
       config: {}
     })
 
@@ -34,10 +35,12 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     function refresh() {
       const sessions = storage.loadSessions()
       const groups = storage.loadGroups()
+      const shortcuts = storage.loadShortcuts()
 
       batch(() => {
         setStore("sessions", sessions)
         setStore("groups", groups)
+        setStore("shortcuts", shortcuts)
         if (status() === "loading") {
           setStatus("partial")
         }
@@ -176,6 +179,27 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           )
           storage.saveGroups(groups)
           refresh()
+        }
+      },
+      shortcut: {
+        list(): Shortcut[] {
+          return store.shortcuts
+        },
+        getByKey(key: string): Shortcut | undefined {
+          return store.shortcuts.find(s => s.key === key)
+        },
+        save(shortcut: Shortcut): void {
+          storage.saveShortcut(shortcut)
+          refresh()
+        },
+        delete(id: string): void {
+          storage.deleteShortcut(id)
+          refresh()
+        },
+        async trigger(shortcut: Shortcut): Promise<Session> {
+          const session = await manager.findOrCreateForShortcut(shortcut)
+          refresh()
+          return session
         }
       },
       refresh
