@@ -15,6 +15,7 @@ import { DialogFork } from "@tui/component/dialog-fork"
 import { DialogRename } from "@tui/component/dialog-rename"
 import { DialogGroup } from "@tui/component/dialog-group"
 import { DialogMove } from "@tui/component/dialog-move"
+import { DialogShortcut } from "@tui/component/dialog-shortcut"
 import { attachSessionSync, capturePane, wasCommandPaletteRequested } from "@/core/tmux"
 import { canFork } from "@/core/claude"
 import { useCommandDialog } from "@tui/component/dialog-command"
@@ -444,6 +445,27 @@ export function Home() {
         dialog.push(() => <DialogFork session={session} />)
       }
     }
+
+    // S (shift) to manage shortcuts
+    if (evt.name === "s" && evt.shift) {
+      dialog.push(() => <DialogShortcut />)
+      return
+    }
+
+    // Check if key matches a defined shortcut
+    if (evt.name.length >= 1 && evt.name.length <= 2) {
+      const shortcut = sync.shortcut.getByKey(evt.name)
+      if (shortcut) {
+        evt.preventDefault()
+        sync.shortcut.trigger(shortcut).then((session) => {
+          if (session.tmuxSession) {
+            handleAttach(session)
+          }
+        }).catch((err) => {
+          toast.error(err as Error)
+        })
+      }
+    }
   })
 
   // Get preview lines that fit in the available height
@@ -804,6 +826,29 @@ export function Home() {
         </box>
       </Show>
 
+      {/* Shortcuts bar */}
+      <Show when={sync.shortcut.list().length > 0}>
+        <box
+          flexDirection="row"
+          width={dimensions().width}
+          paddingLeft={2}
+          paddingRight={2}
+          height={1}
+          backgroundColor={theme.backgroundElement}
+          gap={2}
+        >
+          <text fg={theme.textMuted} attributes={TextAttributes.BOLD}>SHORTCUTS</text>
+          <For each={sync.shortcut.list()}>
+            {(shortcut) => (
+              <box flexDirection="row" gap={0}>
+                <text fg={theme.accent} attributes={TextAttributes.BOLD}>[{shortcut.key}]</text>
+                <text fg={theme.textMuted}> {shortcut.name}</text>
+              </box>
+            )}
+          </For>
+        </box>
+      </Show>
+
       {/* Footer with keybinds */}
       <box
         flexDirection="row"
@@ -849,6 +894,10 @@ export function Home() {
         <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>f</text>
           <text fg={theme.textMuted}>fork</text>
+        </box>
+        <box flexDirection="column" alignItems="center">
+          <text fg={theme.text}>S</text>
+          <text fg={theme.textMuted}>shortcuts</text>
         </box>
         <box flexDirection="column" alignItems="center">
           <text fg={theme.text}>1-9</text>
