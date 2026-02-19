@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
 # Agent View Installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/frayo44/agent-view/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/FlorianRiquelme/agent-view/main/install.sh | bash
 #
 
 set -euo pipefail
 
 APP=agent-view
-REPO="frayo44/agent-view"
+REPO="FlorianRiquelme/agent-view"
 
 # Colors
 MUTED='\033[0;2m'

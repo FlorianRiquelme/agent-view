@@ -58,13 +58,13 @@ Agent View monitors your sessions and shows real-time status indicators:
 ### Quick Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/frayo44/agent-view/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/FlorianRiquelme/agent-view/main/install.sh | bash
 ```
 
 ### Manual Install
 
 ```bash
-git clone git@github.com:frayo44/agent-view.git
+git clone git@github.com:FlorianRiquelme/agent-view.git
 cd agent-view
 bun install
 bun run build

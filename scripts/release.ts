@@ -80,7 +80,7 @@ async function main() {
 ### Installation
 
 \`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/frayo44/agent-view/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/FlorianRiquelme/agent-view/main/install.sh | bash
 \`\`\`
 
 ### Direct Download
@@ -111,7 +111,7 @@ Download the binary for your platform below, make it executable, and run it.
   console.log("")
   console.log("✅ Release complete!")
   console.log("")
-  console.log(`   View release: https://github.com/frayo44/agent-view/releases/tag/${tag}`)
+  console.log(`   View release: https://github.com/FlorianRiquelme/agent-view/releases/tag/${tag}`)
   console.log("")
 }
 
