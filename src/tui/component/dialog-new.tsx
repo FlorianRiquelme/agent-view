@@ -48,6 +48,7 @@ async function commandExists(cmd: string, cwd?: string): Promise<boolean> {
 // History managers for autocomplete suggestions
 const projectPathHistory = new HistoryManager("dialog-new:project-paths", 30)
 const branchNameHistory = new HistoryManager("dialog-new:branch-names", 30)
+const cliOptionsHistory = new HistoryManager("dialog-new:cli-options", 30)
 
 const TOOLS: { value: Tool; label: string; description: string }[] = [
   { value: "claude", label: "Claude Code", description: "Anthropic's Claude CLI" },
@@ -58,7 +59,7 @@ const TOOLS: { value: Tool; label: string; description: string }[] = [
   { value: "shell", label: "Shell", description: "Plain terminal session" }
 ]
 
-type FocusField = "title" | "tool" | "resumeSession" | "customCommand" | "path" | "worktree" | "branch"
+type FocusField = "title" | "tool" | "resumeSession" | "dangerouslySkipPermissions" | "cliOptions" | "customCommand" | "path" | "worktree" | "branch"
 
 export function DialogNew() {
   const dialog = useDialog()
@@ -96,8 +97,14 @@ export function DialogNew() {
     }
   })
 
+  // CLI options state
+  const [cliOptions, setCliOptions] = createSignal("")
+
   // Claude session mode state (new or resume)
   const [claudeSessionMode, setClaudeSessionMode] = createSignal<ClaudeSessionMode>("new")
+
+  // Claude --dangerously-skip-permissions flag
+  const [dangerouslySkipPermissions, setDangerouslySkipPermissions] = createSignal(false)
 
   // Worktree state
   const [useWorktree, setUseWorktree] = createSignal(false)
@@ -116,13 +123,15 @@ export function DialogNew() {
   // Input refs
   let titleInputRef: InputRenderable | undefined
   let customCommandInputRef: InputRenderable | undefined
+  let cliOptionsInputRef: InputRenderable | undefined
   let pathInputRef: InputRenderable | undefined
   let branchInputRef: InputRenderable | undefined
 
-  // Reset Claude session mode when tool changes
+  // Reset Claude-specific options when tool changes
   createEffect(() => {
     if (selectedTool() !== "claude") {
       setClaudeSessionMode("new")
+      setDangerouslySkipPermissions(false)
     }
   })
 
@@ -172,6 +181,13 @@ export function DialogNew() {
       customCommandInputRef?.blur()
     }
 
+    // Handle CLI options input
+    if (field === "cliOptions") {
+      cliOptionsInputRef?.focus()
+    } else {
+      cliOptionsInputRef?.blur()
+    }
+
     // Handle path input
     if (field === "path") {
       pathInputRef?.focus()
@@ -190,13 +206,15 @@ export function DialogNew() {
   // Get the list of focusable fields based on current state
   function getFocusableFields(): FocusField[] {
     const fields: FocusField[] = ["title", "tool"]
-    // Add resume checkbox when Claude is selected
+    // Add Claude-specific checkboxes when Claude is selected
     if (selectedTool() === "claude") {
       fields.push("resumeSession")
+      fields.push("dangerouslySkipPermissions")
     }
     if (selectedTool() === "custom") {
       fields.push("customCommand")
     }
+    fields.push("cliOptions")
     fields.push("path")
     if (isInGitRepo()) {
       fields.push("worktree")
@@ -278,6 +296,12 @@ export function DialogNew() {
         sessionMode: claudeSessionMode()
       } : undefined
 
+      // Combine checkbox flags with the free-form CLI options field
+      const effectiveCliOptions = [
+        selectedTool() === "claude" && dangerouslySkipPermissions() ? "--dangerously-skip-permissions" : "",
+        cliOptions().trim()
+      ].filter(Boolean).join(" ") || undefined
+
       const session = await sync.session.create({
         title: title() || undefined,
         tool: selectedTool(),
@@ -286,13 +310,17 @@ export function DialogNew() {
         worktreePath,
         worktreeRepo,
         worktreeBranch: worktreeBranchName,
-        claudeOptions
+        claudeOptions,
+        cliOptions: effectiveCliOptions
       })
 
       // Save to history for autocomplete suggestions
       projectPathHistory.addEntry(storage, projectPath())
       if (useWorktree() && worktreeBranchName) {
         branchNameHistory.addEntry(storage, worktreeBranchName)
+      }
+      if (cliOptions().trim()) {
+        cliOptionsHistory.addEntry(storage, cliOptions().trim())
       }
 
       const message = useWorktree()
@@ -393,6 +421,25 @@ export function DialogNew() {
       setClaudeSessionMode(claudeSessionMode() === "new" ? "resume" : "new")
       return
     }
+
+    // Arrow key navigation between Claude checkboxes
+    if (focusedField() === "resumeSession" && (evt.name === "down" || evt.name === "j")) {
+      evt.preventDefault()
+      setFocusedField("dangerouslySkipPermissions")
+      return
+    }
+    if (focusedField() === "dangerouslySkipPermissions" && (evt.name === "up" || evt.name === "k")) {
+      evt.preventDefault()
+      setFocusedField("resumeSession")
+      return
+    }
+
+    // Space to toggle dangerously-skip-permissions checkbox
+    if (focusedField() === "dangerouslySkipPermissions" && evt.name === "space") {
+      evt.preventDefault()
+      setDangerouslySkipPermissions(!dangerouslySkipPermissions())
+      return
+    }
   })
 
   return (
@@ -471,7 +518,7 @@ export function DialogNew() {
 
       </box>
 
-      {/* Resume session checkbox (only when Claude is selected) */}
+      {/* Claude-specific checkboxes (only when Claude is selected) */}
       <Show when={selectedTool() === "claude"}>
         <box paddingLeft={4} paddingRight={4} paddingTop={1}>
           <box
@@ -487,6 +534,21 @@ export function DialogNew() {
             </text>
             <text fg={focusedField() === "resumeSession" ? theme.text : theme.textMuted}>
               Resume previous session
+            </text>
+          </box>
+          <box
+            flexDirection="row"
+            gap={1}
+            onMouseUp={() => {
+              setFocusedField("dangerouslySkipPermissions")
+              setDangerouslySkipPermissions(!dangerouslySkipPermissions())
+            }}
+          >
+            <text fg={focusedField() === "dangerouslySkipPermissions" ? theme.primary : theme.textMuted}>
+              {dangerouslySkipPermissions() ? "[x]" : "[ ]"}
+            </text>
+            <text fg={focusedField() === "dangerouslySkipPermissions" ? theme.text : theme.textMuted}>
+              Dangerously skip permissions
             </text>
           </box>
         </box>
@@ -513,6 +575,27 @@ export function DialogNew() {
           </box>
         </box>
       </Show>
+
+      {/* CLI Options field with autocomplete */}
+      <box paddingLeft={4} paddingRight={4} paddingTop={1} gap={1}>
+        <text fg={focusedField() === "cliOptions" ? theme.primary : theme.textMuted}>
+          CLI Options (optional)
+        </text>
+        <InputAutocomplete
+          placeholder="e.g., --dangerously-skip-permissions"
+          value={cliOptions()}
+          onInput={setCliOptions}
+          suggestions={cliOptionsHistory.getFiltered(storage, cliOptions())}
+          onSelect={setCliOptions}
+          focusedBackgroundColor={theme.backgroundElement}
+          cursorColor={theme.primary}
+          focusedTextColor={theme.text}
+          onFocus={() => setFocusedField("cliOptions")}
+          ref={(r) => {
+            cliOptionsInputRef = r
+          }}
+        />
+      </box>
 
       {/* Path field with autocomplete */}
       <box paddingLeft={4} paddingRight={4} paddingTop={1} gap={1}>
