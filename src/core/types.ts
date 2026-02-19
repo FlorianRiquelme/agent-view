@@ -47,6 +47,28 @@ export interface Group {
   defaultPath: string
 }
 
+export interface Shortcut {
+  id: string
+  key: string
+  name: string
+  projectPath: string
+  tool: Tool
+  cliOptions: string
+  groupPath: string
+  skipPermissions: boolean
+  useWorktree: boolean
+  worktreeBranch: string
+  useBaseDevelop: boolean
+  createdAt: Date
+  order: number
+}
+
+export const RESERVED_SHORTCUT_KEYS = new Set([
+  "n", "d", "r", "f", "g", "m", "s", "q", "j", "k", "h", "l",
+  "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  "R", "F", "S",
+])
+
 export interface StatusUpdate {
   sessionId: string
   status: SessionStatus
