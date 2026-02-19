@@ -19,6 +19,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
     const [store, setStore] = createStore<{
       sessions: Session[]
       groups: Group[]
+      shortcuts: Shortcut[]
       config: Config
     }>({
       sessions: [],
