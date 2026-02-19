@@ -137,6 +137,11 @@ export class SessionManager {
       command = getToolCommand(options.tool)
     }
 
+    // Append extra CLI flags if provided
+    if (options.cliOptions?.trim()) {
+      command = `${command} ${options.cliOptions.trim()}`
+    }
+
     log("Creating tmux session:", tmuxName, "command:", command)
 
     // Create tmux session
@@ -159,6 +164,9 @@ export class SessionManager {
     const toolData: Record<string, unknown> = {}
     if (options.tool === "claude" && options.claudeOptions) {
       toolData.claudeSessionMode = options.claudeOptions.sessionMode
+    }
+    if (options.cliOptions?.trim()) {
+      toolData.cliOptions = options.cliOptions.trim()
     }
 
     const session: Session = {
