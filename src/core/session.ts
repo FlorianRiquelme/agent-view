@@ -4,7 +4,7 @@
  */
 
 import { getStorage } from "./storage"
-import type { Session, SessionCreateOptions, SessionForkOptions, SessionStatus, Tool } from "./types"
+import type { Session, SessionCreateOptions, SessionForkOptions, SessionStatus, Tool, Shortcut } from "./types"
 import { getToolCommand } from "./types"
 import * as tmux from "./tmux"
 import { randomUUID } from "crypto"
@@ -488,6 +488,43 @@ export class SessionManager {
     }
 
     return groups
+  }
+
+  /**
+   * Find an existing active session for a shortcut's project path + tool,
+   * or create a new one using the shortcut's saved options.
+   * Returns the session to attach to.
+   */
+  async findOrCreateForShortcut(shortcut: Shortcut): Promise<Session> {
+    const storage = getStorage()
+    const sessions = storage.loadSessions()
+
+    // Find existing active session matching path + tool
+    const activeStatuses: SessionStatus[] = ["running", "waiting", "idle"]
+    const matching = sessions
+      .filter(s =>
+        s.projectPath === shortcut.projectPath &&
+        s.tool === shortcut.tool &&
+        activeStatuses.includes(s.status)
+      )
+      .sort((a, b) => b.lastAccessed.getTime() - a.lastAccessed.getTime())
+
+    if (matching.length > 0) {
+      return matching[0]!
+    }
+
+    // No active session found — create a new one
+    const createOptions: SessionCreateOptions = {
+      projectPath: shortcut.projectPath,
+      tool: shortcut.tool,
+      groupPath: shortcut.groupPath || undefined,
+      cliOptions: [
+        shortcut.skipPermissions ? "--dangerously-skip-permissions" : "",
+        shortcut.cliOptions
+      ].filter(Boolean).join(" ") || undefined
+    }
+
+    return this.create(createOptions)
   }
 }
 
