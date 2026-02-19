@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite"
 import path from "path"
 import os from "os"
 import fs from "fs"
-import type { Session, Group, StatusUpdate, Tool, SessionStatus } from "./types"
+import type { Session, Group, StatusUpdate, Tool, SessionStatus, Shortcut } from "./types"
 
 const SCHEMA_VERSION = 1
 
@@ -91,6 +91,24 @@ export class Storage {
         started INTEGER NOT NULL,
         heartbeat INTEGER NOT NULL,
         is_primary INTEGER NOT NULL DEFAULT 0
+      )
+    `)
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS shortcuts (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        project_path TEXT NOT NULL,
+        tool TEXT NOT NULL DEFAULT 'claude',
+        cli_options TEXT NOT NULL DEFAULT '',
+        group_path TEXT NOT NULL DEFAULT '',
+        skip_permissions INTEGER NOT NULL DEFAULT 0,
+        use_worktree INTEGER NOT NULL DEFAULT 0,
+        worktree_branch TEXT NOT NULL DEFAULT '',
+        use_base_develop INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0
       )
     `)
 
@@ -447,6 +465,116 @@ export class Storage {
     const stmt = this.db.prepare("SELECT value FROM metadata WHERE key = ?")
     const row = stmt.get(key) as { value: string } | undefined
     return row?.value ?? null
+  }
+
+  // Shortcut CRUD
+
+  saveShortcut(shortcut: Shortcut): void {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO shortcuts (
+        id, key, name, project_path, tool, cli_options, group_path,
+        skip_permissions, use_worktree, worktree_branch, use_base_develop,
+        created_at, sort_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    stmt.run(
+      shortcut.id,
+      shortcut.key,
+      shortcut.name,
+      shortcut.projectPath,
+      shortcut.tool,
+      shortcut.cliOptions,
+      shortcut.groupPath,
+      shortcut.skipPermissions ? 1 : 0,
+      shortcut.useWorktree ? 1 : 0,
+      shortcut.worktreeBranch,
+      shortcut.useBaseDevelop ? 1 : 0,
+      shortcut.createdAt.getTime(),
+      shortcut.order
+    )
+  }
+
+  loadShortcuts(): Shortcut[] {
+    if (this.closed) return []
+    const stmt = this.db.prepare(`
+      SELECT id, key, name, project_path, tool, cli_options, group_path,
+        skip_permissions, use_worktree, worktree_branch, use_base_develop,
+        created_at, sort_order
+      FROM shortcuts ORDER BY sort_order
+    `)
+    const rows = stmt.all() as any[]
+    return rows.map(row => ({
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      projectPath: row.project_path,
+      tool: row.tool as Tool,
+      cliOptions: row.cli_options,
+      groupPath: row.group_path,
+      skipPermissions: row.skip_permissions === 1,
+      useWorktree: row.use_worktree === 1,
+      worktreeBranch: row.worktree_branch,
+      useBaseDevelop: row.use_base_develop === 1,
+      createdAt: new Date(row.created_at),
+      order: row.sort_order
+    }))
+  }
+
+  getShortcut(id: string): Shortcut | null {
+    const stmt = this.db.prepare(`
+      SELECT id, key, name, project_path, tool, cli_options, group_path,
+        skip_permissions, use_worktree, worktree_branch, use_base_develop,
+        created_at, sort_order
+      FROM shortcuts WHERE id = ?
+    `)
+    const row = stmt.get(id) as any
+    if (!row) return null
+    return {
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      projectPath: row.project_path,
+      tool: row.tool as Tool,
+      cliOptions: row.cli_options,
+      groupPath: row.group_path,
+      skipPermissions: row.skip_permissions === 1,
+      useWorktree: row.use_worktree === 1,
+      worktreeBranch: row.worktree_branch,
+      useBaseDevelop: row.use_base_develop === 1,
+      createdAt: new Date(row.created_at),
+      order: row.sort_order
+    }
+  }
+
+  getShortcutByKey(key: string): Shortcut | null {
+    const stmt = this.db.prepare(`
+      SELECT id, key, name, project_path, tool, cli_options, group_path,
+        skip_permissions, use_worktree, worktree_branch, use_base_develop,
+        created_at, sort_order
+      FROM shortcuts WHERE key = ?
+    `)
+    const row = stmt.get(key) as any
+    if (!row) return null
+    return {
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      projectPath: row.project_path,
+      tool: row.tool as Tool,
+      cliOptions: row.cli_options,
+      groupPath: row.group_path,
+      skipPermissions: row.skip_permissions === 1,
+      useWorktree: row.use_worktree === 1,
+      worktreeBranch: row.worktree_branch,
+      useBaseDevelop: row.use_base_develop === 1,
+      createdAt: new Date(row.created_at),
+      order: row.sort_order
+    }
+  }
+
+  deleteShortcut(id: string): void {
+    const stmt = this.db.prepare("DELETE FROM shortcuts WHERE id = ?")
+    stmt.run(id)
   }
 
   // Change detection
