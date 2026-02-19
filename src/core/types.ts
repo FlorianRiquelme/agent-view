@@ -86,6 +86,7 @@ export interface SessionCreateOptions {
   worktreeRepo?: string
   worktreeBranch?: string
   claudeOptions?: ClaudeOptions
+  cliOptions?: string          // extra CLI flags appended to the command
 }
 
 export interface SessionForkOptions {
