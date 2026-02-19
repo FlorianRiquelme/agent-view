@@ -4,7 +4,7 @@
  */
 
 import { getStorage } from "./storage"
-import type { Session, SessionCreateOptions, SessionForkOptions, SessionStatus, Tool } from "./types"
+import type { Session, SessionCreateOptions, SessionForkOptions, SessionStatus, Tool, Shortcut } from "./types"
 import { getToolCommand } from "./types"
 import * as tmux from "./tmux"
 import { randomUUID } from "crypto"
@@ -12,6 +12,7 @@ import path from "path"
 import fs from "fs"
 import os from "os"
 import { getClaudeSessionID, buildForkCommand, canFork, buildClaudeCommand } from "./claude"
+import { createWorktree, generateWorktreePath, generateBranchName } from "./git"
 
 const logFile = path.join(os.homedir(), ".agent-orchestrator", "debug.log")
 function log(...args: unknown[]) {
@@ -488,6 +489,76 @@ export class SessionManager {
     }
 
     return groups
+  }
+
+  /**
+   * Find an existing active session for a shortcut's project path + tool,
+   * or create a new one using the shortcut's saved options.
+   * Returns the session to attach to.
+   */
+  async findOrCreateForShortcut(shortcut: Shortcut): Promise<Session> {
+    const storage = getStorage()
+    const sessions = storage.loadSessions()
+
+    // Refresh tmux cache so we can verify sessions actually exist
+    await tmux.refreshSessionCache()
+
+    // Find existing active session matching path + tool,
+    // but only if the tmux session still exists
+    const activeStatuses: SessionStatus[] = ["running", "waiting", "idle"]
+    const matching = sessions
+      .filter(s =>
+        s.projectPath === shortcut.projectPath &&
+        s.tool === shortcut.tool &&
+        activeStatuses.includes(s.status) &&
+        s.tmuxSession && tmux.sessionExists(s.tmuxSession)
+      )
+      .sort((a, b) => b.lastAccessed.getTime() - a.lastAccessed.getTime())
+
+    if (matching.length > 0) {
+      return matching[0]!
+    }
+
+    // No active session found — create a new one
+    let projectPath = shortcut.projectPath
+    let worktreePath: string | undefined
+    let worktreeRepo: string | undefined
+    let worktreeBranchName: string | undefined
+
+    // Handle worktree creation if configured on the shortcut
+    if (shortcut.useWorktree) {
+      const branchName = shortcut.worktreeBranch
+        ? shortcut.worktreeBranch
+        : generateBranchName()
+      const baseBranch = shortcut.useBaseDevelop ? "develop" : undefined
+      const wtPath = generateWorktreePath(shortcut.projectPath, branchName)
+
+      worktreePath = await createWorktree(shortcut.projectPath, branchName, wtPath, baseBranch)
+      projectPath = worktreePath
+      worktreeRepo = shortcut.projectPath
+      worktreeBranchName = branchName
+    }
+
+    // Only add --dangerously-skip-permissions for Claude
+    const cliParts: string[] = []
+    if (shortcut.skipPermissions && shortcut.tool === "claude") {
+      cliParts.push("--dangerously-skip-permissions")
+    }
+    if (shortcut.cliOptions) {
+      cliParts.push(shortcut.cliOptions)
+    }
+
+    const createOptions: SessionCreateOptions = {
+      projectPath,
+      tool: shortcut.tool,
+      groupPath: shortcut.groupPath || undefined,
+      cliOptions: cliParts.join(" ") || undefined,
+      worktreePath,
+      worktreeRepo,
+      worktreeBranch: worktreeBranchName
+    }
+
+    return this.create(createOptions)
   }
 }
 
